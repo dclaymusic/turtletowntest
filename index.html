@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+	body 
+	{ 
+		margin: 0px;
+		padding: 0px;
+		background: #838383; 
+		text-align: center;
+	}
+
+	@font-face {
+    font-family: 'Andale Mono';
+    src: url(andale-mono.ttf);
+    }
+
+	canvas {
+		font-family: 'Andale Mono';
+	}
+
+</style>
+<script src="game-state.js"></script>
+<script src="tiles.js"></script>
+<script src="snd.js"></script>
+<script src="character.js"></script>
+<script src="animation.js"></script>
+<script src="movement.js"></script>
+<script src="keyboard.js"></script>
+<script src="tile-functions.js"></script>
+<script src="items.js"></script>
+<script src="text.js"></script>
+<script src="dialogue.js"></script>
+
+<script src="start.js"></script>
+<script src="main.js"></script>
+<script src="turtle-town.js"></script>
+<script src="world1.js"></script>
+<script src="dungeon1.js"></script>
+<script src="world2.js"></script>
+<script src="dungeon2.js"></script>
+<script src="world3.js"></script>
+<script src="end.js"></script>
+<script src="instrument.js"></script>
+
+
+
+
+<script type="text/javascript">
+
+const START_LEVEL = 'turtle-town'; //this is for playtesting
+// gameState.turtleTownVisits = 2;
+
+//initializing variables
+var ctx = null;
+var audioCtx;
+var windowLoaded = false;
+var soundInitialized = false;
+var soundsLoaded = false;
+var gameStarted = false;
+var inventory, inventoryLoaded;
+
+//
+var mapW = 15, mapH = 15;
+var gameMap = [], itemMap = [];
+var gameMap1 = [], itemMap1 = [];
+var gameMap2 = [], itemMap2 = [];
+var levelBuildTick = true;
+var destructTick = false;
+var dimSurroundings = false;
+var diving = false;
+var startTime,endTime,totalGameTime;
+var endGame = false;
+
+var popupActive = false;
+var activePopupText = [];
+var dialogueActive = false;
+var activeDialogueText = [];
+var signActive = false;
+var activeSignText = [];
+var scrollActive = false;
+var activeScrollText = [];
+var inscriptionActive = false;
+var activeInscriptionText = [];
+var dialoguePage = 0;
+var inventoryActive = false;
+var gotItemActive = false;
+var activeItemText = [];
+var gotItemTileToDraw = 0;
+
+var rapidCycle = 1;
+var waterCycle = 0;
+var deepWaterCycle = 2;
+
+var playerPosLast;
+var playerSpeed = 125;
+var currentSecond = 0, frameCount = 0, framesLastSecond = 0, lastFrameTime = 0;
+
+//animation variables
+var alphaCount = 0; //used in animation.js "diveAnimation"
+var characterScale = 1.0; //used in animation.js and character.js
+var frame = 0; //used for timer in animation.js
+var timer;
+
+//Instantiate Character 
+var player = new Character(); //character.js
+
+//WINDOW ONLOAD
+window.onload = function()
+{
+	windowLoaded = true;
+
+	//begin context and animation
+	ctx = document.getElementById('game').getContext("2d");
+	requestAnimationFrame(drawGame);
+
+	//add key listeners
+	window.addEventListener("keydown", function(e) { toggleKeysDown(e); });
+	window.addEventListener("keyup", function(e) { toggleKeysUp(e); });
+
+	//viewport onload
+	viewport.screen = [document.getElementById('game').width, document.getElementById('game').height];
+
+	//tileset onload
+	tileset = new Image();
+	tileset.onerror = function() {
+		ctx = null;
+		alert("Failed loading tileset.");
+	};
+	tileset.onload = function() { tilesetLoaded = true; }
+	tileset.src = "tiles.png";
+
+	inventoryImg = new Image();
+	inventoryImg.src = "inventory.png";
+	
+};
+
+///MAIN GAME LOOP
+function drawGame()
+{
+	if(ctx==null) { return; }
+	if(!tilesetLoaded) { requestAnimationFrame(drawGame); return; }
+
+	//framerate handling
+	var currentFrameTime = Date.now();
+	var sec = Math.floor(currentFrameTime/1000);
+	var timeElapsed = currentFrameTime - lastFrameTime;
+	var tick;
+	if(sec!=currentSecond) {
+		currentSecond = sec;
+		framesLastSecond = frameCount;
+		frameCount = 1; }
+	else { frameCount++; }
+
+	//move the player -- movement.js
+	processMovement(currentFrameTime); //movement.js
+
+	//if the player has arrived at a tile, "tick" is active allowing sounds and events to be triggered.
+	if (player.position != playerPosLast) { tick = true; } else { tick = false; }
+
+	viewport.update(player.position[0] + (player.dimensions[0]/2),
+		player.position[1] + (player.dimensions[1]/2));
+
+	//draw background / clear screen
+	ctx.fillStyle = black;
+	ctx.fillRect(0, 0, viewport.screen[0], viewport.screen[1]);
+
+	//draw current world map
+	if(gameState.level == 'start') { drawStart(currentFrameTime, currentSecond, tick); }
+	if(gameState.level == 'main') { drawMain(currentFrameTime, currentSecond, tick); }
+	if(gameState.level == 'turtle-town') { drawTurtleTown(currentFrameTime, currentSecond, tick); }
+	if(gameState.level == 'world1') { drawWorld1(currentFrameTime, currentSecond, tick); }
+	if(gameState.level == 'dungeon1') { drawDungeon1(currentFrameTime, currentSecond, tick); }
+	if(gameState.level == 'world2') { drawWorld2(currentFrameTime, currentSecond, tick); }
+	if(gameState.level == 'dungeon2') { drawDungeon2(currentFrameTime, currentSecond, tick); }
+	if(gameState.level == 'world3') { drawWorld3(currentFrameTime, currentSecond, tick); }
+
+
+	if(gameState.level == 'instrument') { drawInstrument(currentFrameTime, currentSecond, tick); }
+	if(gameState.level == 'end') { drawEnd(); }
+
+
+	//events activated once per tile
+	if(tick && gameState.level != 'start') { 
+
+		//item handler in items.js
+		itemHandler(); //item sounds are covered here
+
+		//sound handler connected to tileTypes
+		let snd = tileTypes[gameMap[toIndex(playerX(),playerY())]].sound;
+		if(snd != undefined) { selectSnd(snd, 0); } //if a sound is matched with a tile, play it
+
+		//don't draw player if current tile(s) marked as invisible
+		if(tileTypes[gameMap[toIndex(playerX(),playerY())]].invisible) { player.invisible = true; }
+		else { player.invisible = false; }
+
+		//dim surroundings if tunnel
+		if(tileTypes[gameMap[toIndex(playerX(),playerY())]].tunnel || tileTypes[gameMap[toIndex(playerX(),playerY())]].undimmable) 
+		{
+			dimSurroundings = true; //dimmable settings
+		}
+		else { dimSurroundings = false; }
+		swapDimmableTiles(); //tile-handler.js
+
+	}
+
+	// draw text popups if active (each have update function for setting text)
+	if(popupActive) { drawPopup(); } //in items.js and baked into item objects
+	else if(gotItemActive) { drawGotItem(); } //in items.js and baked into item objects
+	else if(signActive) { drawSign(); } //update text in level 'tick' function
+	else if(scrollActive) { drawScroll(); } //update text in level 'tick' function
+	else if(dialogueActive) { drawDialogue(); } //update text in level 'tick' function
+	else if(inscriptionActive) { drawInscription(); } //update text in level 'tick' function
+	else if(inventoryActive) { drawInventory(); } //update text in level 'tick' function
+	// drawFPS(); //movement.js
+
+	playerPosLast = player.position; //for determining current tile in next frame
+	lastFrameTime = currentFrameTime; //for determining last frame time
+	requestAnimationFrame(drawGame);
+
+}
+</script>
+
+</head>
+	<body>
+		<canvas id="game" width="600" height="600"></canvas>
+	</body>
+</html>
